@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="war" name="TimeSheet:war">
+    <output-path>$PROJECT_DIR$/target</output-path>
+    <root id="archive" name="TimeSheet-1.0-SNAPSHOT.war">
+      <element id="artifact" artifact-name="TimeSheet:war exploded" />
+    </root>
+  </artifact>
+</component>

@@ -18,12 +18,15 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.*;
 import java.net.URLEncoder;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class UploadServlet extends HttpServlet {
     private String fileName; //存储上传的文件名称 方便导出的时候用
     private String[] mapKey = {"name", "date", "ontime", "offtime"}; //存储excel行数据的map key值
-    private String[] head = {"姓名", "日期", "上班时间", "下班时间", "加班分钟", "加班天数"}; //存储excel行数据的map key值
+    private String[] head = {"姓名", "日期", "上班时间", "下班时间", "加班分钟", "加班天数", "加班天数总计"}; //导出文件的列名称
+    private Map<Date, Date> mHoliday = new HashMap<Date, Date>(); //存储节假日
+    SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
@@ -34,8 +37,11 @@ public class UploadServlet extends HttpServlet {
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         try {
             File upload = upload(req);
-            List list = excelToList(upload);
-            doExport(resp, list);
+
+            if (upload != null) {
+                List<Map<String, String>> list = excelToList(upload);
+                doExport(resp, list);
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -43,6 +49,13 @@ public class UploadServlet extends HttpServlet {
         req.getRequestDispatcher("/index.jsp").forward(req, resp);
     }
 
+    /**
+     * 导出
+     *
+     * @param resp
+     * @param list
+     * @throws Exception
+     */
     private void doExport(HttpServletResponse resp, List<Map<String, String>> list) throws Exception {
         resp.reset();
         resp.setContentType("application/x-msdownload");
@@ -60,19 +73,48 @@ public class UploadServlet extends HttpServlet {
         }
 
         int index = 1;
+        SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm");
 
         for (Map<String, String> map : list) {
             row = sheet.createRow(index);
+            String date = map.get(mapKey[1]); //日期
+            Date dDate = dateFormat.parse(date); //日期
+            String ontime = map.get(mapKey[2]); //上班时间
+            String offtime = map.get(mapKey[3]); //下班时间
+            long nOvertimeMinutes = 0; //加班分钟
 
             for (int i = 0; i < head.length; i++) {
                 HSSFCell cell = row.createCell(i);
 
                 switch (i) {
-                    case 4:
-                        cell.setCellValue("4");
+                    case 4: //加班分钟
+                        if (ontime != null && !ontime.equals("") && offtime != null && !offtime.equals("")) {
+                            long lOntime = timeFormat.parse(ontime).getTime(); //上班毫秒
+                            long lOfftime = timeFormat.parse(offtime).getTime(); //下班毫秒
+
+                            if (mHoliday.containsKey(dDate)) { //节假日
+                                nOvertimeMinutes = (lOfftime - lOntime) / 1000 / 60;
+                            } else { //工作日
+                                long l1 = (timeFormat.parse("09:30").getTime() - lOntime) / 1000 / 60;
+                                l1 = l1 < 0 ? 0 : l1;
+                                long l2 = (lOfftime - timeFormat.parse("19:00").getTime()) / 1000 / 60;
+                                l2 = l2 < 0 ? 0 : l2;
+                                nOvertimeMinutes = l1 + l2;
+                            }
+                        }
+
+                        cell.setCellValue(nOvertimeMinutes);
                         break;
-                    case 5:
-                        cell.setCellValue("5");
+                    case 5: //加班天数
+                        double dOvertimeDay = 0;
+
+                        if (nOvertimeMinutes >= 60 && nOvertimeMinutes < 120) {
+                            dOvertimeDay = 0.5;
+                        } else if (nOvertimeMinutes >= 120) {
+                            dOvertimeDay = 1;
+                        }
+
+                        cell.setCellValue(dOvertimeDay);
                         break;
                     default:
                         cell.setCellValue(map.get(mapKey[i]));
@@ -101,6 +143,22 @@ public class UploadServlet extends HttpServlet {
         }
     }
 
+    private Map listToMap(List<Map<String, String>> list) throws Exception {
+        Map<String, List<Map<String, String>>> map = new HashMap<String, List<Map<String, String>>>();
+
+        for (Map<String, String> stringMap : list) {
+            String name = stringMap.get(mapKey[0]);
+
+            if (map.containsKey(name)) {
+
+            } else {
+                // TODO: 2017/10/10 list转map
+            }
+        }
+
+        return map;
+    }
+
     /**
      * 解析excel并转成list
      *
@@ -108,8 +166,8 @@ public class UploadServlet extends HttpServlet {
      * @return
      * @throws Exception
      */
-    private List excelToList(File file) throws Exception {
-        List<Map> list = new ArrayList<Map>();
+    private List<Map<String, String>> excelToList(File file) throws Exception {
+        List<Map<String, String>> list = new ArrayList<Map<String, String>>();
 
         HSSFWorkbook workbook = new HSSFWorkbook(FileUtils.openInputStream(file));
         HSSFSheet sheet = workbook.getSheetAt(0);
@@ -207,46 +265,54 @@ public class UploadServlet extends HttpServlet {
         List<FileItem> list = upload.parseRequest(req);
 
         for (FileItem item : list) {
-            //得到上传的文件名称
-            String filename = item.getName();
-            System.out.println(filename);
+            //如果fileitem中封装的是普通输入项的数据
+            if (item.isFormField()) {
+                String name = item.getFieldName();
+                //解决普通输入项的数据的中文乱码问题
+                String value = item.getString("UTF-8");
+                mHoliday.put(dateFormat.parse(value), dateFormat.parse(value));
+            } else {
+                //得到上传的文件名称
+                String filename = item.getName();
+                System.out.println(filename);
 
-            if (filename == null || filename.trim().equals("")) {
-                continue;
-            }
+                if (filename == null || filename.trim().equals("")) {
+                    continue;
+                }
 
-            //注意：不同的浏览器提交的文件名是不一样的，有些浏览器提交上来的文件名是带有路径的，如：  c:\a\b\1.txt，而有些只是单纯的文件名，如：1.txt
-            //处理获取到的上传文件的文件名的路径部分，只保留文件名部分
-            filename = filename.substring(filename.lastIndexOf("\\") + 1);
-            fileName = filename;
-            //得到上传文件的扩展名
-            String fileExtName = filename.substring(filename.lastIndexOf(".") + 1);
-            //如果需要限制上传的文件类型，那么可以通过文件的扩展名来判断上传的文件类型是否合法
-            System.out.println("上传的文件的扩展名是：" + fileExtName);
-            //获取item中的上传文件的输入流
-            InputStream in = item.getInputStream();
-            //得到文件保存的名称
-            String saveFilename = makeFileName(filename);
-            //得到文件的保存目录
-            String realSavePath = makePath(saveFilename, savePath);
-            //创建一个文件输出流
-            FileOutputStream out = new FileOutputStream(realSavePath + "\\" + saveFilename);
-            //创建一个缓冲区
-            byte buffer[] = new byte[1024];
-            //判断输入流中的数据是否已经读完的标识
-            int len;
-            //循环将输入流读入到缓冲区当中，(len=in.read(buffer))>0就表示in里面还有数据
-            while ((len = in.read(buffer)) > 0) {
-                //使用FileOutputStream输出流将缓冲区的数据写入到指定的目录(savePath + "\\" + filename)当中
-                out.write(buffer, 0, len);
+                //注意：不同的浏览器提交的文件名是不一样的，有些浏览器提交上来的文件名是带有路径的，如：  c:\a\b\1.txt，而有些只是单纯的文件名，如：1.txt
+                //处理获取到的上传文件的文件名的路径部分，只保留文件名部分
+                filename = filename.substring(filename.lastIndexOf("\\") + 1);
+                fileName = filename;
+                //得到上传文件的扩展名
+                String fileExtName = filename.substring(filename.lastIndexOf(".") + 1);
+                //如果需要限制上传的文件类型，那么可以通过文件的扩展名来判断上传的文件类型是否合法
+                System.out.println("上传的文件的扩展名是：" + fileExtName);
+                //获取item中的上传文件的输入流
+                InputStream in = item.getInputStream();
+                //得到文件保存的名称
+                String saveFilename = makeFileName(filename);
+                //得到文件的保存目录
+                String realSavePath = makePath(saveFilename, savePath);
+                //创建一个文件输出流
+                FileOutputStream out = new FileOutputStream(realSavePath + "\\" + saveFilename);
+                //创建一个缓冲区
+                byte buffer[] = new byte[1024];
+                //判断输入流中的数据是否已经读完的标识
+                int len;
+                //循环将输入流读入到缓冲区当中，(len=in.read(buffer))>0就表示in里面还有数据
+                while ((len = in.read(buffer)) > 0) {
+                    //使用FileOutputStream输出流将缓冲区的数据写入到指定的目录(savePath + "\\" + filename)当中
+                    out.write(buffer, 0, len);
+                }
+                //关闭输入流
+                in.close();
+                //关闭输出流
+                out.close();
+                //删除处理文件上传时生成的临时文件
+                item.delete();
+                file = new File(realSavePath + "\\" + saveFilename);
             }
-            //关闭输入流
-            in.close();
-            //关闭输出流
-            out.close();
-            //删除处理文件上传时生成的临时文件
-            item.delete();
-            file = new File(realSavePath + "\\" + saveFilename);
         }
 
         return file;
@@ -258,8 +324,7 @@ public class UploadServlet extends HttpServlet {
      * @param filename 文件的原始名称
      * @return uuid+"_"+文件的原始名称
      */
-    private String makeFileName(String filename) {  //2.jpg
-        //为防止文件覆盖的现象发生，要为上传文件产生一个唯一的文件名
+    private String makeFileName(String filename) {
         return UUID.randomUUID().toString() + "_" + filename;
     }
 

@@ -62,7 +62,7 @@
         <div class="cover-container">
             <div class="masthead clearfix">
                 <div class="inner">
-                    <h3>专门为黎大人做的考勤计算小工具</h3>
+                    <%--<h3>专为狗砸做的考勤计算小工具</h3>--%>
                 </div>
             </div>
 

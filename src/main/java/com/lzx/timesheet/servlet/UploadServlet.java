@@ -5,12 +5,12 @@ import org.apache.commons.fileupload.ProgressListener;
 import org.apache.commons.fileupload.disk.DiskFileItemFactory;
 import org.apache.commons.fileupload.servlet.ServletFileUpload;
 import org.apache.commons.io.FileUtils;
-import org.apache.poi.hssf.usermodel.HSSFCell;
-import org.apache.poi.hssf.usermodel.HSSFRow;
-import org.apache.poi.hssf.usermodel.HSSFSheet;
-import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.hssf.usermodel.*;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
 import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.VerticalAlignment;
+import org.apache.poi.ss.util.CellRangeAddress;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
@@ -40,29 +40,32 @@ public class UploadServlet extends HttpServlet {
 
             if (upload != null) {
                 List<Map<String, String>> list = excelToList(upload);
-                doExport(resp, list);
+                Map<String, List<Map<String, String>>> map = listToMap(list);
+                doExport(resp, map);
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
-
-        req.getRequestDispatcher("/index.jsp").forward(req, resp);
     }
 
     /**
      * 导出
      *
      * @param resp
-     * @param list
+     * @param mapTime
      * @throws Exception
      */
-    private void doExport(HttpServletResponse resp, List<Map<String, String>> list) throws Exception {
+    private void doExport(HttpServletResponse resp, Map<String, List<Map<String, String>>> mapTime) throws Exception {
         resp.reset();
         resp.setContentType("application/x-msdownload");
         resp.setHeader("Content-Disposition", "attachment; filename=" + URLEncoder.encode(fileName, "UTF-8"));
 
         HSSFWorkbook workbook = new HSSFWorkbook();
         HSSFSheet sheet = workbook.createSheet();
+
+        HSSFCellStyle cellStyle = workbook.createCellStyle();
+        cellStyle.setAlignment(HorizontalAlignment.CENTER); // 居中
+        cellStyle.setVerticalAlignment(VerticalAlignment.CENTER);//垂直
 
         //生成表头
         HSSFRow row = sheet.createRow(0);
@@ -72,57 +75,87 @@ public class UploadServlet extends HttpServlet {
             cell.setCellValue(head[i]);
         }
 
-        int index = 1;
+        int index = 1; //记录excel行数
+        int beginRow = 1; //记录每个人的起始行
         SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm");
 
-        for (Map<String, String> map : list) {
-            row = sheet.createRow(index);
-            String date = map.get(mapKey[1]); //日期
-            Date dDate = dateFormat.parse(date); //日期
-            String ontime = map.get(mapKey[2]); //上班时间
-            String offtime = map.get(mapKey[3]); //下班时间
-            long nOvertimeMinutes = 0; //加班分钟
+        Iterator<Map.Entry<String, List<Map<String, String>>>> iterator = mapTime.entrySet().iterator();
 
-            for (int i = 0; i < head.length; i++) {
-                HSSFCell cell = row.createCell(i);
+        while (iterator.hasNext()) {
+            Map.Entry<String, List<Map<String, String>>> entry = iterator.next();
 
-                switch (i) {
-                    case 4: //加班分钟
-                        if (ontime != null && !ontime.equals("") && offtime != null && !offtime.equals("")) {
-                            long lOntime = timeFormat.parse(ontime).getTime(); //上班毫秒
-                            long lOfftime = timeFormat.parse(offtime).getTime(); //下班毫秒
+            List<Map<String, String>> list = entry.getValue();
+            double dOvertimeDayAll = 0; //加班天数总计
 
-                            if (mHoliday.containsKey(dDate)) { //节假日
-                                nOvertimeMinutes = (lOfftime - lOntime) / 1000 / 60;
-                            } else { //工作日
-                                long l1 = (timeFormat.parse("09:30").getTime() - lOntime) / 1000 / 60;
-                                l1 = l1 < 0 ? 0 : l1;
-                                long l2 = (lOfftime - timeFormat.parse("19:00").getTime()) / 1000 / 60;
-                                l2 = l2 < 0 ? 0 : l2;
-                                nOvertimeMinutes = l1 + l2;
+            for (Map<String, String> map : list) {
+                row = sheet.createRow(index);
+                String date = map.get(mapKey[1]); //日期
+                Date dDate = dateFormat.parse(date); //日期
+                String ontime = map.get(mapKey[2]); //上班时间
+                String offtime = map.get(mapKey[3]); //下班时间
+                long nOvertimeMinutes = 0; //加班分钟
+                double dOvertimeDay = 0; //加班天数
+
+                for (int i = 0; i < head.length; i++) {
+                    HSSFCell cell = row.createCell(i);
+
+                    switch (i) {
+                        case 4: //加班分钟
+                            if (ontime != null && !ontime.equals("") && offtime != null && !offtime.equals("")) {
+                                long lOntime = timeFormat.parse(ontime).getTime(); //上班毫秒
+                                long lOfftime = timeFormat.parse(offtime).getTime(); //下班毫秒
+
+                                if (mHoliday.containsKey(dDate)) { //节假日
+                                    nOvertimeMinutes = (lOfftime - lOntime) / 1000 / 60;
+                                } else { //工作日
+                                    long l1 = (timeFormat.parse("09:30").getTime() - lOntime) / 1000 / 60;
+                                    l1 = l1 < 0 ? 0 : l1;
+                                    long l2 = (lOfftime - timeFormat.parse("19:00").getTime()) / 1000 / 60;
+                                    l2 = l2 < 0 ? 0 : l2;
+                                    nOvertimeMinutes = l1 + l2;
+                                }
                             }
-                        }
 
-                        cell.setCellValue(nOvertimeMinutes);
-                        break;
-                    case 5: //加班天数
-                        double dOvertimeDay = 0;
+                            cell.setCellValue(nOvertimeMinutes);
+                            break;
+                        case 5: //加班天数
+                            if (nOvertimeMinutes >= 60 && nOvertimeMinutes < 120) {
+                                dOvertimeDay = 0.5;
+                            } else if (nOvertimeMinutes >= 120) {
+                                dOvertimeDay = 1;
+                            }
 
-                        if (nOvertimeMinutes >= 60 && nOvertimeMinutes < 120) {
-                            dOvertimeDay = 0.5;
-                        } else if (nOvertimeMinutes >= 120) {
-                            dOvertimeDay = 1;
-                        }
-
-                        cell.setCellValue(dOvertimeDay);
-                        break;
-                    default:
-                        cell.setCellValue(map.get(mapKey[i]));
-                        break;
+                            cell.setCellValue(dOvertimeDay);
+                            break;
+                        case 6: //加班天数总计
+                            dOvertimeDayAll += dOvertimeDay;
+                            break;
+                        default:
+                            cell.setCellValue(map.get(mapKey[i]));
+                            break;
+                    }
                 }
+
+                index++;
             }
 
-            index++;
+            if (list.size() > 1) {
+                row = sheet.getRow(beginRow);
+                HSSFCell cell = row.createCell(6);
+                cell.setCellValue(dOvertimeDayAll);
+                cell.setCellStyle(cellStyle);
+
+                CellRangeAddress cellRangeAddress = new CellRangeAddress(beginRow, beginRow + list.size() - 1, 6, 6);
+                sheet.addMergedRegion(cellRangeAddress);
+
+            }
+
+            beginRow += list.size();
+        }
+
+        //列自适应宽度
+        for (int i = 0; i < head.length; i++) {
+            sheet.autoSizeColumn(i);
         }
 
         OutputStream out = null;
@@ -143,17 +176,26 @@ public class UploadServlet extends HttpServlet {
         }
     }
 
-    private Map listToMap(List<Map<String, String>> list) throws Exception {
-        Map<String, List<Map<String, String>>> map = new HashMap<String, List<Map<String, String>>>();
+    /**
+     * list转map key值为姓名 方便统计与合并行
+     *
+     * @param list
+     * @return
+     * @throws Exception
+     */
+    private Map<String, List<Map<String, String>>> listToMap(List<Map<String, String>> list) throws Exception {
+        Map<String, List<Map<String, String>>> map = new LinkedHashMap<String, List<Map<String, String>>>();
 
         for (Map<String, String> stringMap : list) {
             String name = stringMap.get(mapKey[0]);
+            List<Map<String, String>> mapList = new ArrayList<Map<String, String>>();
 
             if (map.containsKey(name)) {
-
-            } else {
-                // TODO: 2017/10/10 list转map
+                mapList = map.get(name);
             }
+
+            mapList.add(stringMap);
+            map.put(name, mapList);
         }
 
         return map;

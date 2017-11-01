@@ -89,8 +89,13 @@ public class UploadServlet extends HttpServlet {
 
             for (Map<String, String> map : list) {
                 row = sheet.createRow(index);
+
                 String date = map.get(mapKey[1]); //日期
+                date = date.replace("/","-");
                 Date dDate = dateFormat.parse(date); //日期
+                date = dateFormat.format(dDate);
+                map.put(mapKey[1], date);
+
                 String ontime = map.get(mapKey[2]); //上班时间
                 String offtime = map.get(mapKey[3]); //下班时间
                 long nOvertimeMinutes = 0; //加班分钟

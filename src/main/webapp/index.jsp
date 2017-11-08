@@ -7,6 +7,7 @@
 
     Calendar instance = Calendar.getInstance();
     instance.setTime(new Date());
+    instance.set(Calendar.MONTH, instance.get(Calendar.MONTH) - 1);
 
     if (sYear == null || sYear.equals("")) {
         sYear = String.valueOf(instance.get(Calendar.YEAR));
